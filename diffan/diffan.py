@@ -56,7 +56,8 @@ class DiffAN():
         X = torch.FloatTensor(X).to(self.device)
         self.train_score(X)
         order = self.topological_ordering(X)
-        out_dag = self.pruning(order, X.detach().cpu().numpy())
+        # out_dag = self.pruning(order, X.detach().cpu().numpy())
+        out_dag = self.A
         return out_dag, order
 
     def pruning(self, order, X):
@@ -202,6 +203,15 @@ class DiffAN():
             jacobian.append(jacobian_[..., active_nodes].detach().cpu().numpy())
         jacobian = np.concatenate(jacobian, 0)
         leaf = self.get_leaf(jacobian)
+
+        jacobian_mean = np.abs(jacobian.mean(0))
+
+        jacobian_mean = (jacobian_mean + jacobian_mean.T) * 0.5
+
+        eigenvalues, eigenvectors = np.linalg.eig(jacobian_mean)
+
+        leaf = np.argmin(eigenvalues)
+
         self.fill_A(jacobian, leaf, active_nodes)
 
         return leaf
@@ -217,11 +227,32 @@ class DiffAN():
 
     def fill_A(self, jacobian_active, leaf, active_nodes):
         global_leaf = active_nodes[leaf]
-        threshold = 0.1
+        threshold = 10
         jacobian_mean = np.abs(jacobian_active.mean(0))
-        parents = [active_nodes[i] for i in np.where(jacobian_mean[leaf] > threshold * jacobian_mean[leaf][leaf])[0]]
 
+        jacobian_mean = (jacobian_mean + jacobian_mean.T) * 0.5
+
+        eigenvalues, eigenvectors = np.linalg.eig(jacobian_mean)
+
+        leaf = np.argmin(eigenvalues)
+
+        leaf_eigenvector = np.abs(eigenvectors[leaf])
+        # leaf_eigenvector = leaf_eigenvector / np.sum(leaf_eigenvector)
+
+        global_leaf = active_nodes[leaf]
+
+        # parents = [active_nodes[i] for i in np.where(jacobian_mean[leaf] > threshold * jacobian_mean[leaf][leaf])[0]]
+        parents = [active_nodes[i] for i in np.where(leaf_eigenvector > threshold * leaf_eigenvector[leaf])[0]]
+
+        print()
+        print(active_nodes)
+        print(leaf, global_leaf)
+        print(eigenvalues)
+        print(leaf_eigenvector)
         print(parents)
 
         self.A[parents, global_leaf] = 1
         self.A[global_leaf, global_leaf] = 0
+
+        # print(self.A)
+        # print('-'*100)
