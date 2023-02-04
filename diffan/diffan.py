@@ -196,21 +196,24 @@ class DiffAN():
         return (x * dropout_mask).float()
 
     def compute_jacobian_and_get_leaf(self, data_loader, active_nodes, model_fn_functorch):
+
         jacobian = []
+
         for x_batch in data_loader:
             x_batch_dropped = self.get_masked(x_batch, active_nodes) if self.masking else x_batch
             jacobian_ = vmap(jacrev(model_fn_functorch))(x_batch_dropped.unsqueeze(1)).squeeze()
             jacobian.append(jacobian_[..., active_nodes].detach().cpu().numpy())
         jacobian = np.concatenate(jacobian, 0)
+
         leaf = self.get_leaf(jacobian)
 
-        jacobian_mean = np.abs(jacobian.mean(0))
-
-        jacobian_mean = (jacobian_mean + jacobian_mean.T) * 0.5
-
-        eigenvalues, eigenvectors = np.linalg.eig(jacobian_mean)
-
-        leaf = np.argmin(eigenvalues)
+        # jacobian_mean = np.abs(jacobian.mean(0))
+        #
+        # jacobian_mean = (jacobian_mean + jacobian_mean.T) * 0.5
+        #
+        # eigenvalues, eigenvectors = np.linalg.eig(jacobian_mean)
+        #
+        # leaf = np.argmin(eigenvalues)
 
         self.fill_A(jacobian, leaf, active_nodes)
 
@@ -230,19 +233,19 @@ class DiffAN():
         threshold = 10
         jacobian_mean = np.abs(jacobian_active.mean(0))
 
-        jacobian_mean = (jacobian_mean + jacobian_mean.T) * 0.5
+        # jacobian_mean = (jacobian_mean + jacobian_mean.T) * 0.5
+        #
+        # eigenvalues, eigenvectors = np.linalg.eig(jacobian_mean)
 
-        eigenvalues, eigenvectors = np.linalg.eig(jacobian_mean)
+        # leaf = np.argmin(eigenvalues)
 
-        leaf = np.argmin(eigenvalues)
+        # leaf_eigenvector = np.abs(eigenvectors[leaf])
+        # # leaf_eigenvector = leaf_eigenvector / np.sum(leaf_eigenvector)
 
-        leaf_eigenvector = np.abs(eigenvectors[leaf])
-        # leaf_eigenvector = leaf_eigenvector / np.sum(leaf_eigenvector)
+        # global_leaf = active_nodes[leaf]
 
-        global_leaf = active_nodes[leaf]
-
-        # parents = [active_nodes[i] for i in np.where(jacobian_mean[leaf] > threshold * jacobian_mean[leaf][leaf])[0]]
-        parents = [active_nodes[i] for i in np.where(leaf_eigenvector > threshold * leaf_eigenvector[leaf])[0]]
+        parents = [active_nodes[i] for i in np.where(jacobian_mean[leaf] > threshold * jacobian_mean[leaf][leaf])[0]]
+        # parents = [active_nodes[i] for i in np.where(leaf_eigenvector > threshold * leaf_eigenvector[leaf])[0]]
 
         print()
         print(active_nodes)
@@ -254,5 +257,5 @@ class DiffAN():
         self.A[parents, global_leaf] = 1
         self.A[global_leaf, global_leaf] = 0
 
-        # print(self.A)
-        # print('-'*100)
+        print(self.A)
+        print('-'*100)
