@@ -78,6 +78,7 @@ class DiffAN():
         data_loader_val = torch.utils.data.DataLoader(X_val, min(val_size, self.batch_size))
         data_loader = torch.utils.data.DataLoader(X_train, min(train_size, self.batch_size), drop_last=True)
         pbar = tqdm(range(self.epochs), desc="Training Epoch")
+        alpha = 0.01
         for epoch in pbar:
             loss_per_step = []
             for steps, x_start in enumerate(data_loader):
@@ -87,10 +88,17 @@ class DiffAN():
                 noise = torch.randn_like(x_start).to(self.device)
                 x_t = self.gaussian_diffusion.q_sample(x_start, t, noise=noise)
                 # get loss function
+
                 model_output = self.model(x_t, self.gaussian_diffusion._scale_timesteps(t))
+
+                ts = self.gaussian_diffusion._scale_timesteps(t)
+                model_score = lambda x, t: self.model(x, t)
+                jacobian_ = vmap(jacrev(model_score), randomness='different')(x_t.unsqueeze(1), ts.unsqueeze(1)).squeeze()
+                norm1_jacobian = torch.norm(jacobian_.mean(0), 1)
+
                 diffusion_losses = (noise - model_output) ** 2
                 diffusion_loss = (
-                        diffusion_losses.mean(dim=list(range(1, len(diffusion_losses.shape)))) * weights).mean()
+                        diffusion_losses.mean(dim=list(range(1, len(diffusion_losses.shape)))) * weights).mean() + alpha * norm1_jacobian
                 loss_per_step.append(diffusion_loss.item())
                 self.opt.zero_grad()
                 diffusion_loss.backward()
@@ -104,9 +112,16 @@ class DiffAN():
                             noise = torch.randn_like(x_start).to(self.device)
                             x_t = self.gaussian_diffusion.q_sample(x_start, t, noise=noise)
                             model_output = self.model(x_t, self.gaussian_diffusion._scale_timesteps(t))
+
+                            ts = self.gaussian_diffusion._scale_timesteps(t)
+                            model_score = lambda x, t: self.model(x, t)
+                            jacobian_ = vmap(jacrev(model_score), randomness='different')(x_t.unsqueeze(1),
+                                                                                          ts.unsqueeze(1)).squeeze()
+                            norm1_jacobian = torch.norm(jacobian_.mean(0), 1)
+
                             diffusion_losses = (noise - model_output) ** 2
                             diffusion_loss = (diffusion_losses.mean(
-                                dim=list(range(1, len(diffusion_losses.shape)))) * weights).mean()
+                                dim=list(range(1, len(diffusion_losses.shape)))) * weights).mean() + alpha * norm1_jacobian
                             loss_per_step_val.append(diffusion_loss.item())
                         epoch_val_loss = np.mean(loss_per_step_val)
 
@@ -230,7 +245,7 @@ class DiffAN():
 
     def fill_A(self, jacobian_active, leaf, active_nodes):
         global_leaf = active_nodes[leaf]
-        threshold = 10
+        threshold = 0.01
         jacobian_mean = np.abs(jacobian_active.mean(0))
 
         # jacobian_mean = (jacobian_mean + jacobian_mean.T) * 0.5
@@ -244,7 +259,8 @@ class DiffAN():
 
         # global_leaf = active_nodes[leaf]
 
-        parents = [active_nodes[i] for i in np.where(jacobian_mean[leaf] > threshold * jacobian_mean[leaf][leaf])[0]]
+        # parents = [active_nodes[i] for i in np.where(jacobian_mean[leaf] > threshold * jacobian_mean[leaf][leaf])[0]]
+        parents = [active_nodes[i] for i in np.where(jacobian_mean[leaf] > threshold)[0]]
         # parents = [active_nodes[i] for i in np.where(leaf_eigenvector > threshold * leaf_eigenvector[leaf])[0]]
 
         print()
